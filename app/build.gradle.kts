@@ -11,8 +11,10 @@ android {
         applicationId = "com.nova.zenfone"
         minSdk = 24          // Android 7.0 Nougat (ASUS ZenFone 3 Max ZC520TL)
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        // Vosk (wake word) ships native code; the ZenFone (MT6737T) is ARM.
+        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
+        versionCode = 3
+        versionName = "1.0.0"
     }
 
     signingConfigs {
@@ -30,7 +32,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
@@ -57,6 +59,10 @@ android {
 }
 
 dependencies {
+    // Offline keyword spotting for the optional "Hey NØVA" wake word.
+    implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    testImplementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
     // Renders the real views to PNGs on the JVM (no emulator needed) for visual checks.
     testImplementation("org.robolectric:robolectric:4.14.1")
