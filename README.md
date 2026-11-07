@@ -28,7 +28,7 @@ How releases are made (`.github/workflows/build-apk.yml`):
 - Every push builds an APK, downloadable from that run under **Actions → Artifacts**.
 - Every push to `main` publishes a Release `v<versionName>` with the APK, once per version.
 - To ship a new version, bump `versionCode` (+1) and `versionName` in `app/build.gradle.kts`.
-- Pushing a tag such as `v0.2.0` also publishes that release.
+- Pushing a tag such as `v0.2.0`, or **Actions → Build APK → Run workflow**, also publishes it.
 
 ## Install on the ZenFone
 
