@@ -1,5 +1,10 @@
 name: Build APK
 
+# Every push builds an APK (downloadable from the run's Artifacts).
+# Every push to main publishes a GitHub Release "v<versionName>" with the APK attached,
+# once per version — bump versionCode/versionName in app/build.gradle.kts to release again.
+# Pushing a tag like v0.2.0 also publishes that release.
+
 on:
   push:
     branches: ["**"]
@@ -26,22 +31,37 @@ jobs:
           # The default list includes the removed legacy 'tools' package.
           packages: "platform-tools platforms;android-35 build-tools;35.0.0"
 
+      - name: Read app version
+        id: version
+        run: |
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "App version: $VERSION"
+
       - name: Build debug APK
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk "NOVA-${GITHUB_REF_NAME//\//-}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "NOVA-v${{ steps.version.outputs.name }}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NOVA-debug-apk
-          path: NOVA-*-debug.apk
+          name: NOVA-v${{ steps.version.outputs.name }}-apk
+          path: NOVA-v*.apk
 
-      - name: Attach APK to GitHub Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: NOVA-*-debug.apk
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v$VERSION"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — bump versionName in app/build.gradle.kts to publish a new one."
+            exit 0
+          fi
+          gh release create "$TAG" "NOVA-v$VERSION.apk" \
+            --target "$GITHUB_SHA" \
+            --title "NØVA $TAG" \
+            --generate-notes

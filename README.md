@@ -19,13 +19,16 @@ A minimal black faceplate with two glowing cyan eyes and a short cyan mouth that
 | Dashboard | Long-press → big clock, date, seconds, battery %, charging, sound on/off |
 | Device | Landscape, immersive full-screen, screen kept on, animation paused in background |
 
-## Get the APK without Android Studio
+## Download the APK
 
-Every push to GitHub builds an APK automatically (`.github/workflows/build-apk.yml`):
+**Every version is on the [Releases page](../../releases)** as `NOVA-v<version>.apk`.
 
-1. Open the repo on GitHub → **Actions** → latest **Build APK** run.
-2. Download the **NOVA-debug-apk** artifact (a zip containing the `.apk`).
-3. Pushing a tag such as `v0.1.0` also attaches the APK to a **GitHub Release** for a permanent link.
+How releases are made (`.github/workflows/build-apk.yml`):
+
+- Every push builds an APK, downloadable from that run under **Actions → Artifacts**.
+- Every push to `main` publishes a Release `v<versionName>` with the APK, once per version.
+- To ship a new version, bump `versionCode` (+1) and `versionName` in `app/build.gradle.kts`.
+- Pushing a tag such as `v0.2.0` also publishes that release.
 
 ## Install on the ZenFone
 
@@ -40,8 +43,9 @@ adb install -r NOVA-debug.apk
 (Enable *Developer options* by tapping **Settings → About → Software info → Build number** 7 times,
 then turn on **USB debugging**.)
 
-> Debug APKs built on different machines are signed with different debug keys. If an update refuses to
-> install over the old one, uninstall NØVA first. A permanent release key comes in Stage 10.
+> All builds are signed with the same committed key (`app/nova-debug.keystore`), so each new version installs
+> over the previous one and keeps your settings. If you installed the very first APK sent in chat, uninstall
+> it once before installing from Releases. A private release key comes in Stage 10.
 
 ## Build it yourself
 

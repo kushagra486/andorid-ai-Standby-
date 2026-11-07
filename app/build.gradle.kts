@@ -15,6 +15,18 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        // A fixed, committed DEBUG key so every build (CI, Android Studio, any PC) has the
+        // same signature and each new version installs over the previous one.
+        // Not secret, not for Play Store. A private release key comes in Stage 10.
+        getByName("debug") {
+            storeFile = file("nova-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
