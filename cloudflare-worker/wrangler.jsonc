@@ -1,0 +1,22 @@
+{
+  // NØVA AI proxy. Deploy: npx wrangler deploy   (see README.md)
+  "name": "nova-ai",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+
+  // Workers AI — used automatically when no GEMINI_API_KEY secret is set (free daily allowance).
+  "ai": { "binding": "AI" },
+
+  // Per-installation rate limit: 20 requests / 60 s.
+  "ratelimits": [
+    { "name": "RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }
+  ],
+
+  "vars": {
+    "GEMINI_MODEL": "gemini-2.5-flash",
+    "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct"
+  }
+  // Secrets (never in Git):  npx wrangler secret put NOVA_ACCESS_TOKEN
+  //                          npx wrangler secret put GEMINI_API_KEY   (optional)
+}

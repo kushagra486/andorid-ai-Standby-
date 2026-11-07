@@ -20,17 +20,29 @@ android {
     signingConfigs {
         // A fixed, committed DEBUG key so every build (CI, Android Studio, any PC) has the
         // same signature and each new version installs over the previous one.
-        // Not secret, not for Play Store. A private release key comes in Stage 10.
+        // Not secret, not for Play Store. The private release key is separate (see below).
         getByName("debug") {
             storeFile = file("nova-debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // Owner-controlled release key, supplied only via environment (CI secrets or your PC).
+        // See scripts/make-release-key.sh. Never committed.
+        val ks = System.getenv("NOVA_KEYSTORE_FILE")
+        if (ks != null && file(ks).exists()) {
+            create("release") {
+                storeFile = file(ks)
+                storePassword = System.getenv("NOVA_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("NOVA_KEY_ALIAS") ?: "nova"
+                keyPassword = System.getenv("NOVA_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
