@@ -122,7 +122,7 @@ class WidgetRenderer(private val context: Context) {
         val p = pad(r)
         t(c, w.place, r.left + p, r.top + p + r.height() * 0.08f, min(r.height() * 0.1f, 26f), ColorRole.TEXT, face = Theme.medium, maxW = r.width() * 0.6f)
         val iconSize = r.height() * (if (big) 0.16f else 0.2f)
-        weatherIcon(c, w.code, w.isDay, r.right - p - iconSize, r.top + p + iconSize, iconSize)
+        weatherIcon(c, w.code, w.isDay, r.right - p - iconSize * 1.6f, r.top + p + iconSize * 1.3f, iconSize)
         val tempSize = r.height() * (if (big) 0.26f else 0.36f)
         t(c, temp(w.tempC), r.left + p, r.top + p + r.height() * 0.1f + tempSize, tempSize, ColorRole.TEXT, face = Theme.light)
         val desc = Weather.describe(w.code) + if (small) "" else "  ·  H ${temp(w.highC)}  L ${temp(w.lowC)}"

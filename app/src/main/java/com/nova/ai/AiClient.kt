@@ -72,6 +72,8 @@ object AiClient {
         }
         is java.net.UnknownHostException, is java.net.ConnectException -> "No internet — local commands still work"
         is java.net.SocketTimeoutException -> "Cloud AI timed out"
+        is javax.net.ssl.SSLException, is java.security.cert.CertificateException ->
+            "Secure connection failed — check the phone's date & time are correct"
         is org.json.JSONException -> "Cloud AI sent a malformed reply"
         else -> e.message ?: "Cloud AI error"
     }

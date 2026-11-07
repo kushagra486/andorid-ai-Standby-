@@ -54,6 +54,7 @@ class StandbyHost(context: Context, private val factory: (Family) -> FamilyPage)
         fun onFamilyChanged(family: Family)
         fun onQuickControlsPull(progress: Float, release: Boolean)
         fun onUserActivity()
+        fun onSettingsButton()
     }
 
     var listener: Listener? = null
@@ -71,9 +72,20 @@ class StandbyHost(context: Context, private val factory: (Family) -> FamilyPage)
     private var neighbour: Family? = null
 
     private val overlay = Overlay(context)
+    private val gear = GearButton(context).apply { setOnClickListener { listener?.onSettingsButton() } }
 
     init {
         addView(overlay, LayoutParams(-1, -1))
+        val d = resources.displayMetrics.density
+        addView(gear, LayoutParams((44 * d).toInt(), (44 * d).toInt(), android.view.Gravity.TOP or android.view.Gravity.END).apply {
+            topMargin = (2 * d).toInt(); rightMargin = (2 * d).toInt()
+        })
+    }
+
+    /** Hide the corner settings button while a page owns the screen (e.g. layout editing). */
+    fun refreshChrome() {
+        gear.visibility = if (pages[current]?.capturesGestures == true) View.GONE else View.VISIBLE
+        gear.invalidate()
     }
 
     fun page(f: Family): FamilyPage = pages.getOrPut(f) {
@@ -112,6 +124,7 @@ class StandbyHost(context: Context, private val factory: (Family) -> FamilyPage)
         else { v.alpha = 1f; if (v.translationX == 0f) v.translationX = direction * width.toFloat(); v.animate().translationX(0f).setDuration(240).start() }
         target.onShow()
         overlay.flash()
+        refreshChrome()
         listener?.onFamilyChanged(f)
     }
 
@@ -281,6 +294,45 @@ class StandbyHost(context: Context, private val factory: (Family) -> FamilyPage)
 
     override fun onViewAdded(child: View?) {
         super.onViewAdded(child)
-        if (child !== overlay) overlay.bringToFront()
+        if (child !== overlay && child !== gear) { overlay.bringToFront(); gear.bringToFront() }
+    }
+}
+
+/** Always-visible settings button for the top-right corner: a small gear on a translucent disc. */
+class GearButton(context: Context) : View(context) {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    init {
+        isClickable = true
+        isFocusable = true
+        contentDescription = "Settings"
+        setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> v.alpha = 0.6f
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.alpha = 1f
+            }
+            false
+        }
+    }
+
+    override fun onDraw(c: Canvas) {
+        val cx = width / 2f; val cy = height / 2f
+        val r = minOf(width, height) * 0.36f
+        p.style = Paint.Style.FILL
+        p.color = Theme.withAlpha(Look.c(ColorRole.BACKGROUND), 170)
+        c.drawCircle(cx, cy, r * 1.25f, p)
+        val color = Look.c(ColorRole.TEXT_2)
+        // Teeth.
+        p.color = color; p.strokeWidth = r * 0.34f; p.strokeCap = Paint.Cap.ROUND; p.style = Paint.Style.STROKE
+        for (i in 0 until 8) {
+            val a = Math.toRadians(i * 45.0)
+            c.drawLine(cx + (Math.cos(a) * r * 0.55).toFloat(), cy + (Math.sin(a) * r * 0.55).toFloat(),
+                cx + (Math.cos(a) * r * 0.82).toFloat(), cy + (Math.sin(a) * r * 0.82).toFloat(), p)
+        }
+        // Ring + hole.
+        p.strokeWidth = r * 0.26f
+        c.drawCircle(cx, cy, r * 0.52f, p)
+        p.style = Paint.Style.FILL; p.color = Look.c(ColorRole.BACKGROUND)
+        c.drawCircle(cx, cy, r * 0.2f, p)
     }
 }

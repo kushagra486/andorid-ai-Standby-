@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 7.0's built-in certificate store predates the roots most modern HTTPS sites use
+  (Let's Encrypt ISRG, Google Trust Services, SSL.com, Certainly…), which made Cloudflare,
+  Open-Meteo, Groq and Spotify fail with "Trust anchor for certification path not found".
+  NØVA trusts the phone's own roots PLUS these public roots (res/raw/extra_roots.pem, taken
+  from Mozilla's CA list). Nothing is trusted that a current desktop browser wouldn't trust.
+
+  Cleartext HTTP stays allowed only because smart-home devices (ESP32) on the home LAN rarely
+  have HTTPS; SmartHome.checkUrl() refuses plain http to anything that isn't a private address.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/extra_roots" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

@@ -57,7 +57,7 @@ class ScreenshotTest {
         DataHub.battery = BatteryInfo(76, charging = true, plugged = true, tempC = 31f)
         DataHub.wifi = WifiInfo(enabled = true, connected = true, name = "Home-5G", signal = 2, online = true)
         DataHub.bluetooth = BluetoothInfo(available = true, enabled = true, connectedName = "JBL Flip 5", paired = listOf("JBL Flip 5", "Fire TV Stick", "Boat Rockerz"))
-        DataHub.weather = WeatherInfo("Pune", 27.4, 2, true, 31.0, 19.0, 9.0, now, listOf(22 to 26.0, 23 to 25.0, 0 to 24.0, 1 to 23.0, 2 to 22.0, 3 to 21.0))
+        DataHub.weather = WeatherInfo("Prayagraj", 27.4, 2, true, 31.0, 19.0, 9.0, now, listOf(22 to 26.0, 23 to 25.0, 0 to 24.0, 1 to 23.0, 2 to 22.0, 3 to 21.0))
         DataHub.weatherStatus = ""
         DataHub.events = listOf(
             CalendarEvent("Design review", now + 40 * 60_000, now + 100 * 60_000, false, "Zoom"),
@@ -95,7 +95,7 @@ class ScreenshotTest {
         data()
         Prefs.nightMode = NightMode.OFF
         Prefs.raw.edit().putBoolean("never", true).apply()
-        Prefs.weatherPlace = "Pune"
+        Prefs.weatherPlace = "Prayagraj"
         val root = a.window.decorView
         val host: StandbyHost = field(a, "host")
         ShadowSystemClock.advanceBy(Duration.ofSeconds(9))
