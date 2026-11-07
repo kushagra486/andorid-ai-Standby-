@@ -1,0 +1,31 @@
+{
+  // NØVA AI proxy. Deploy: npx wrangler deploy   (see README.md)
+  "name": "andorid-ai-standby",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+
+  // Only the production URL is public; don't publish a separate URL for every branch build.
+  "workers_dev": true,
+  "preview_urls": false,
+
+  // Workers AI — used automatically when no GEMINI_API_KEY secret is set (free daily allowance).
+  "ai": { "binding": "AI" },
+
+  // Per-installation rate limit: 20 requests / 60 s.
+  "ratelimits": [
+    { "name": "RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } }
+  ],
+
+  "vars": {
+    // Optional: force one of groq | openrouter | nvidia | gemini | workers-ai (otherwise first key found wins).
+    "AI_PROVIDER": "",
+    "GROQ_MODEL": "llama-3.3-70b-versatile",
+    "OPENROUTER_MODEL": "meta-llama/llama-3.3-70b-instruct:free",
+    "NVIDIA_MODEL": "meta/llama-3.3-70b-instruct",
+    "GEMINI_MODEL": "gemini-2.5-flash",
+    "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct"
+  }
+  // Secrets (never in Git):  npx wrangler secret put NOVA_ACCESS_TOKEN
+  //                          optional, any one of: GROQ_API_KEY, OPENROUTER_API_KEY, NVIDIA_API_KEY, GEMINI_API_KEY
+}

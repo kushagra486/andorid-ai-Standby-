@@ -1,0 +1,79 @@
+name: Deploy AI Worker
+
+# Deploys cloudflare-worker/ to your Cloudflare account and sets its secrets.
+# Needs repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — Cloudflare API token from the "Edit Cloudflare Workers" template
+#   NOVA_ACCESS_TOKEN      — any long random string; type the same value into NØVA → Settings → Cloud AI
+# Optional:
+#   CLOUDFLARE_ACCOUNT_ID  — only if the token can see more than one account
+#   GROQ_API_KEY / OPENROUTER_API_KEY / NVIDIA_API_KEY / GEMINI_API_KEY — use that provider
+#   instead of the free Workers AI model (first one found wins; see cloudflare-worker/README.md)
+# Runs on demand (Actions → Deploy AI Worker → Run workflow) and when the Worker changes on main.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, "claude/**"]
+    paths: ["cloudflare-worker/**", ".github/workflows/deploy-worker.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      NOVA_ACCESS_TOKEN: ${{ secrets.NOVA_ACCESS_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+    defaults:
+      run:
+        shell: bash          # implies -eo pipefail, so a failed deploy fails the job
+        working-directory: cloudflare-worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check required secrets
+        run: |
+          missing=""
+          [ -z "$CLOUDFLARE_API_TOKEN" ] && missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -z "$NOVA_ACCESS_TOKEN" ] && missing="$missing NOVA_ACCESS_TOKEN"
+          if [ -n "$missing" ]; then echo "::error::Add repository secret(s):$missing"; exit 1; fi
+          if [ ${#NOVA_ACCESS_TOKEN} -lt 20 ]; then echo "::error::NOVA_ACCESS_TOKEN should be at least 20 characters"; exit 1; fi
+
+      - name: Test
+        run: node --test test/*.test.js
+
+      - name: Deploy
+        id: deploy
+        run: |
+          npx --yes wrangler@4 deploy 2>&1 | tee deploy.log
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Set Worker secrets
+        run: |
+          printf '%s' "$NOVA_ACCESS_TOKEN" | npx --yes wrangler@4 secret put NOVA_ACCESS_TOKEN
+          for k in GEMINI_API_KEY GROQ_API_KEY OPENROUTER_API_KEY NVIDIA_API_KEY; do
+            if [ -n "${!k}" ]; then printf '%s' "${!k}" | npx --yes wrangler@4 secret put "$k"; fi
+          done
+
+      - name: Health check
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          if [ -z "$URL" ]; then echo "::warning::Deployed, but no workers.dev URL found in the output (is a workers.dev subdomain set up?)"; exit 0; fi
+          sleep 5
+          curl -fsS "$URL/v1/health" && echo
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/v1/chat" -H 'content-type: application/json' -d '{"text":"hi"}')
+          [ "$code" = "401" ] || { echo "::error::expected 401 without a token, got $code"; exit 1; }
+          echo "### NØVA AI Worker is live" >> "$GITHUB_STEP_SUMMARY"
+          echo "Put this in NØVA → Settings → Cloud AI → Worker URL: \`$URL\`" >> "$GITHUB_STEP_SUMMARY"

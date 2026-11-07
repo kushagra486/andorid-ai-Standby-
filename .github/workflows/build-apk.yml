@@ -1,0 +1,97 @@
+name: Build APK
+
+# Every push: Android unit tests + UI screenshots, Worker tests, debug APK (Actions → Artifacts).
+# Push to main (or a v* tag, or "Run workflow"): publishes GitHub Release v<versionName> with the APK,
+# once per version — bump versionCode/versionName in app/build.gradle.kts to release again.
+# If the repository secrets NOVA_KEYSTORE_BASE64 + NOVA_KEYSTORE_PASSWORD exist, the release
+# also contains an APK signed with the owner's private key (see scripts/make-release-key.sh).
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      HAS_RELEASE_KEY: ${{ secrets.NOVA_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          # The default list includes the removed legacy 'tools' package.
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cloudflare Worker tests
+        working-directory: cloudflare-worker
+        run: node --test test/*.test.js
+
+      - name: Read app version
+        id: version
+        run: |
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "App version: $VERSION"
+
+      - name: Unit tests + screenshots, then build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk "NOVA-v${{ steps.version.outputs.name }}.apk"
+
+      - name: Build signed release APK (only if the owner added signing secrets)
+        env:
+          KEY_B64: ${{ secrets.NOVA_KEYSTORE_BASE64 }}
+          NOVA_KEYSTORE_PASSWORD: ${{ secrets.NOVA_KEYSTORE_PASSWORD }}
+        if: env.HAS_RELEASE_KEY == 'true'
+        run: |
+          echo "$KEY_B64" | base64 -d > "$RUNNER_TEMP/nova-release.jks"
+          NOVA_KEYSTORE_FILE="$RUNNER_TEMP/nova-release.jks" ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "NOVA-v${{ steps.version.outputs.name }}-release-signed.apk"
+          rm -f "$RUNNER_TEMP/nova-release.jks"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-v${{ steps.version.outputs.name }}-apk
+          path: NOVA-v*.apk
+
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-v${{ steps.version.outputs.name }}-screenshots
+          path: app/build/screenshots/
+          if-no-files-found: ignore
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.name }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v$VERSION"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — bump versionName in app/build.gradle.kts to publish a new one."
+            exit 0
+          fi
+          gh release create "$TAG" NOVA-v*.apk \
+            --target "$GITHUB_SHA" \
+            --title "NØVA $TAG" \
+            --generate-notes
