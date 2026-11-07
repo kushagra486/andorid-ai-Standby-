@@ -35,12 +35,19 @@ Model names get retired over time; if a provider starts returning errors, update
 3. **Actions → Deploy AI Worker → Run workflow**. The run summary shows the Worker URL.
 4. Phone: **Settings → Cloud AI** → Use Cloud AI, Worker URL, Access token (same as step 2) → Test connection.
 
+## Or: Cloudflare's own Git integration (Workers Builds)
+
+If you connected this repo in the Cloudflare dashboard, set **Worker → Settings → Build →
+Root directory = `cloudflare-worker`** (deploy command `npx wrangler deploy`). The Worker name must stay
+`andorid-ai-standby` (matches `wrangler.jsonc`). Add `NOVA_ACCESS_TOKEN` (and any AI key) under
+**Settings → Variables and Secrets** as type *Secret*, or let the GitHub workflow set them.
+
 ## Deploy from your computer
 
 ```bash
 cd cloudflare-worker
 npx wrangler login                       # opens the browser
-npx wrangler deploy                      # → https://nova-ai.<your-subdomain>.workers.dev
+npx wrangler deploy                      # → https://andorid-ai-standby.<your-subdomain>.workers.dev
 openssl rand -hex 24                     # make an access token
 npx wrangler secret put NOVA_ACCESS_TOKEN   # paste it
 npx wrangler secret put GEMINI_API_KEY      # optional: from aistudio.google.com/apikey

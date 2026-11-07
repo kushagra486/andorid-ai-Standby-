@@ -277,7 +277,7 @@ object SettingsPages {
         section(footer = "General questions go to your own Cloudflare Worker (see cloudflare-worker/README.md). The AI key stays on Cloudflare; " +
             "this phone only stores the Worker address and your access token. Every action the AI proposes is checked against NØVA's allowlist.") {
             toggle("Use Cloud AI", Prefs.aiEnabled) { Prefs.aiEnabled = it }
-            textField("Worker URL", Prefs.aiEndpoint, hint = "https://nova-ai.<you>.workers.dev") { Prefs.aiEndpoint = it.trimEnd('/') }
+            textField("Worker URL", Prefs.aiEndpoint, hint = "https://andorid-ai-standby.<you>.workers.dev") { Prefs.aiEndpoint = it.trimEnd('/') }
             textField("Access token", Prefs.aiToken, secret = true) { Prefs.aiToken = it }
             action("Test connection") { AiClient.health { msg -> screen.confirm("Cloud AI", msg, "OK") {} } }
         }

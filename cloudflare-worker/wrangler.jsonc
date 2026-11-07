@@ -1,6 +1,6 @@
 {
   // NØVA AI proxy. Deploy: npx wrangler deploy   (see README.md)
-  "name": "nova-ai",
+  "name": "andorid-ai-standby",
   "main": "src/index.js",
   "compatibility_date": "2026-10-01",
   "observability": { "enabled": true },
