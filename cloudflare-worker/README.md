@@ -14,7 +14,19 @@ again on the phone against the same allowlist. Nothing in the APK or Git contain
 **Limits:** 20 requests/minute per installation (rate-limiting binding), 500 characters per request.
 **Privacy:** prompts and replies are never logged; only error status codes.
 
-## Deploy (one time)
+## Deploy from GitHub (recommended — nothing to install)
+
+1. Cloudflare dashboard → **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers"** template →
+   Account resources: your account → Create → copy the token.
+   (First time using Workers? Open **Workers & Pages** once so Cloudflare creates your `workers.dev` subdomain.)
+2. GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**:
+   * `CLOUDFLARE_API_TOKEN` = the token from step 1
+   * `NOVA_ACCESS_TOKEN` = any long random string (e.g. from a password generator) — keep it, the phone needs it
+   * optional `GEMINI_API_KEY`
+3. **Actions → Deploy AI Worker → Run workflow**. The run summary shows the Worker URL.
+4. Phone: **Settings → Cloud AI** → Use Cloud AI, Worker URL, Access token (same as step 2) → Test connection.
+
+## Deploy from your computer
 
 ```bash
 cd cloudflare-worker
