@@ -102,3 +102,11 @@ test("OpenAI-compatible providers (Groq) are called with the key and validated",
     assert.equal(seen.body.model, "llama-3.3-70b-versatile");
   } finally { globalThis.fetch = realFetch; }
 });
+
+test("unauthenticated requests are rate limited by IP before the token check", async () => {
+  const keys = [];
+  const limiter = env({ RATE_LIMITER: { limit: async ({ key }) => { keys.push(key); return { success: !key.startsWith("ip:") }; } } });
+  const r = await worker.fetch(chat({ authorization: "Bearer wrong", "cf-connecting-ip": "1.2.3.4", "x-nova-install": "rotating" }, { text: "hi" }), limiter);
+  assert.equal(r.status, 429);
+  assert.deepEqual(keys, ["ip:1.2.3.4"]);
+});

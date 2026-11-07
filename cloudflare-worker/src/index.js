@@ -93,14 +93,18 @@ export default {
     if (url.pathname !== "/v1/chat") return json({ error: "not found" }, 404);
     if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
 
+    // Rate limit by client IP first, so tokens can't be brute-forced by rotating headers.
+    const ip = request.headers.get("cf-connecting-ip") || "unknown";
+    if (await rateLimited(env, "ip:" + ip)) return json({ error: "rate limited" }, 429);
+
     // Authenticate: owner-issued access token (Worker secret NOVA_ACCESS_TOKEN).
     const auth = request.headers.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (!env.NOVA_ACCESS_TOKEN || !safeEqual(token, env.NOVA_ACCESS_TOKEN)) return json({ error: "unauthorized" }, 401);
 
-    // Rate limit per installation (falls back to client IP).
-    const install = (request.headers.get("x-nova-install") || request.headers.get("cf-connecting-ip") || "anon").slice(0, 64);
-    if (await rateLimited(env, install)) return json({ error: "rate limited" }, 429);
+    // Then per installation.
+    const install = (request.headers.get("x-nova-install") || ip).slice(0, 64);
+    if (await rateLimited(env, "install:" + install)) return json({ error: "rate limited" }, 429);
 
     if ((Number(request.headers.get("content-length")) || 0) > 4096) return json({ error: "too large" }, 413);
     let body;
