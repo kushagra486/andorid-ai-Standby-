@@ -5,6 +5,10 @@
   "compatibility_date": "2026-10-01",
   "observability": { "enabled": true },
 
+  // Only the production URL is public; don't publish a separate URL for every branch build.
+  "workers_dev": true,
+  "preview_urls": false,
+
   // Workers AI — used automatically when no GEMINI_API_KEY secret is set (free daily allowance).
   "ai": { "binding": "AI" },
 
