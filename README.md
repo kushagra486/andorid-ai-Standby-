@@ -3,21 +3,36 @@
 An autonomous AI desk companion for the **ASUS ZenFone 3 Max ZC520TL** (Android 7.0 / API 24).
 A minimal black faceplate with two glowing cyan eyes and a short cyan mouth that lives on your desk.
 
-> **Status: v0.1.0 — Stage 1 (Pixel Pet foundation).** Voice, AI, Spotify, Bluetooth and Fire TV
-> are planned for later stages and are **not** implemented yet.
+> **Status: v0.2.0 — Stage 2 (personality engine + StandBy-style UI).** Voice, AI, Spotify, Bluetooth and
+> Fire TV are planned for later stages and are **not** implemented yet.
 
-## What works in v0.1.0
+## What works
 
 | Feature | Details |
 |---|---|
 | Pixel Pet face | Canvas-drawn faceplate, cyan oval eyes with soft glow, pill mouth |
-| Animation | Blinking (incl. double-blink), eye wandering, breathing, reaction hop, ~30 fps cap |
-| Expressions | Idle, Happy, Mischievous, Curious, Surprised, Confused, Annoyed, Sleepy, Sleeping |
-| Touch | Tap → random playful reaction + haptic + chirp; 7 rapid taps → Annoyed |
-| Sleep | 5 min idle → Sleepy, 15 min → Sleeping (floating z's); tap to wake (Surprised) |
-| Sounds | Original electronic chirps synthesised in code (no audio files) |
-| Dashboard | Long-press → big clock, date, seconds, battery %, charging, sound on/off |
-| Device | Landscape, immersive full-screen, screen kept on, animation paused in background |
+| Motion | Spring physics (gentle overshoot), blinking, eye wandering, breathing, reaction hop |
+| 14 expressions | Idle, Happy, Mischievous, Curious, Surprised, Confused, Annoyed, Thinking, Listening, Dancing, Error, Sleepy, Sleeping (+ night variants) |
+| Personality engine | Priority-based state machine (`PetBrain`), silent idle micro-behaviours, error status line |
+| Touch | Tap → reaction + haptic + sound; 7 rapid taps → Annoyed; tap wakes it from sleep |
+| Sleep | 5 min idle → Sleepy, 15 min → Sleeping (1 / 5 min at night) |
+| Sounds | 10 original synthesised sounds, volume setting, limiter (≥200 ms apart, ≤10 per minute) |
+| Clock page | StandBy-inspired widget cards: big clock + date, battery ring, Settings card; swipe or long-press |
+| Night mode | Off / 22:00–07:00 / Always; **Red** (StandBy-style) or **Dim** look; mutes sounds |
+| Settings | iOS-style grouped list: sounds, volume, animation intensity, night mode/look, test all expressions |
+| Battery care | Adaptive frame rate: 30 fps animating, 25 idle, 15 sleepy/calm, 8 sleeping; paused in background |
+
+## Navigation
+
+- **Face** → swipe sideways or long-press → **Clock**
+- **Clock** → tap the *Settings* card → **Settings**; tap/swipe elsewhere → back to the face
+- Clock returns to the face after 30 s, Settings after 60 s of inactivity
+- **Settings → Test all expressions** plays every expression with its sound (tap to stop)
+
+## Tests
+
+`./gradlew testDebugUnitTest` runs the personality/sound/settings unit tests and renders every screen at
+1280×720 into `app/build/screenshots/` (Robolectric, no emulator). CI uploads those PNGs with each build.
 
 ## Download the APK
 
@@ -62,11 +77,14 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 
 ```
 app/src/main/java/com/nova/
-├── MainActivity.kt          mode switching, immersive/landscape, lifecycle
-├── pet/PetView.kt           face renderer, animation loop, gestures, idle/sleep logic
-├── pet/Expression.kt        expression geometry table
-├── audio/SoundFx.kt         synthesised chirps
-└── dashboard/DashboardView.kt  clock / date / battery / sound toggle
+├── MainActivity.kt              screens (face / clock / settings), cross-fades, lifecycle
+├── pet/PetBrain.kt             personality state machine (pure Kotlin, unit-tested)
+├── pet/PetView.kt              face renderer: springs, motions, night look, adaptive fps
+├── pet/Expression.kt           expression geometry, priority and motion table
+├── audio/SoundFx.kt            synthesised sounds + SoundLimiter
+├── dashboard/DashboardView.kt  StandBy-style clock page
+├── settings/                   NovaSettings (prefs) + iOS-style SettingsView
+└── ui/Theme.kt                 colours, fonts, night tint
 ```
 
 ## Roadmap (from the project report)

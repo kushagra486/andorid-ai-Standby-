@@ -12,72 +12,98 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import com.nova.audio.SoundFx
+import com.nova.audio.SoundFx.Sound
+import com.nova.settings.Intensity
+import com.nova.settings.NightStyle
+import com.nova.settings.NovaSettings
+import com.nova.ui.Theme
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
  * The NØVA face: black rounded faceplate, two glowing cyan oval eyes and a short cyan
  * pill mouth. Drawn with plain Canvas calls (no bitmaps, no blur filters) so it stays
- * cheap on the ZenFone's MT6737T. The frame loop runs only while the view is resumed.
+ * cheap on the ZenFone's MT6737T.
+ *
+ * Personality lives in [PetBrain]; this class only renders it. Face geometry follows
+ * the brain's expression through damped springs, so changes settle with a slight,
+ * natural overshoot (iOS-style motion). The frame rate adapts to what is on screen.
  */
 class PetView(context: Context, private val sound: SoundFx) : View(context) {
 
     interface Listener {
         fun onLongPress()
+        fun onSwipe()
+        fun onExpressionTestFinished()
     }
 
     var listener: Listener? = null
 
-    // ---- Tunables -------------------------------------------------------------------
-    private val frameMs = 33L                       // ~30 fps is plenty for this face
-    private val sleepyAfterMs = 5 * 60_000L         // idle → sleepy
-    private val sleepAfterMs = 15 * 60_000L         // idle → sleeping
-    private val hintVisibleMs = 7_000L
+    val brain = PetBrain(cue = { e -> soundFor(e)?.let { sound.play(it, now()) } })
 
-    // ---- Colours / paints -------------------------------------------------------------
-    private val cyan = Color.rgb(0x22, 0xE5, 0xFF)
-    private val facePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(0x0B, 0x0F, 0x14) }
-    private val faceEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; color = Color.rgb(0x16, 0x1E, 0x27)
+    // ---- Settings -----------------------------------------------------------------------
+    private var intensity = Intensity.NORMAL
+    private var nightStyle = NightStyle.RED
+    private var settings = NovaSettings()
+    private var nightTarget = 0f
+    private var night = 0f
+    private var nextNightCheck = 0L
+
+    fun apply(s: NovaSettings) {
+        settings = s
+        intensity = s.intensity
+        nightStyle = s.nightStyle
+        brain.spontaneous = s.intensity != Intensity.LOW
+        nextNightCheck = 0L
     }
-    private val eyePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = cyan }
-    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = cyan }
-    private val innerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(0x9A, 0xF6, 0xFF) }
+
+    // ---- Paints -------------------------------------------------------------------------
+    private val facePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val faceEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val eyePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val innerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val mouthPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = cyan
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = cyan; textAlign = Paint.Align.CENTER
+        textAlign = Paint.Align.CENTER; typeface = Theme.light
     }
 
-    // ---- Animated state -----------------------------------------------------------------
-    private var expression = Expression.IDLE
-    private var baseExpression = Expression.IDLE
-    private var reactionUntil = 0L
-    private var cur = FloatArray(12).also { write(it, Expression.IDLE.shape) }
-    private val tgt = FloatArray(12)
+    // ---- Spring-animated geometry -------------------------------------------------------
+    private val pos = FloatArray(N).also { write(it, Expression.IDLE.shape) }
+    private val vel = FloatArray(N)
+    private val tgt = FloatArray(N)
+    private val stiffness = 170f
+    private val damping = 2f * 0.72f * sqrt(170f)   // under-damped: a gentle overshoot
 
+    // ---- Small motions ------------------------------------------------------------------
     private var nextBlinkAt = 0L
     private var blinkStart = -1L
     private val blinkMs = 150L
-
     private var lookX = 0f; private var lookY = 0f
     private var lookTX = 0f; private var lookTY = 0f
     private var nextLookAt = 0L
+    private var glitchX = 0f
+    private var nextGlitchAt = 0L
+    private var lastFrame = 0L
+    private var startedAt = 0L
+    private var started = false
 
-    private var hopStart = -1L
-    private var lastInteraction = SystemClock.uptimeMillis()
-    private var startedAt = SystemClock.uptimeMillis()
-    private val recentTaps = ArrayDeque<Long>()
+    // ---- Expression test ----------------------------------------------------------------
+    private var testIndex = -1
+    private var nextTestAt = 0L
+    private val testStepMs = 2_600L
 
     private var running = false
     private val frame = object : Runnable {
         override fun run() {
             if (!running) return
             invalidate()
-            postDelayed(this, frameMs)
+            postDelayed(this, frameDelay())
         }
     }
 
@@ -88,10 +114,17 @@ class PetView(context: Context, private val sound: SoundFx) : View(context) {
         override fun onDown(e: MotionEvent) = true
         override fun onSingleTapUp(e: MotionEvent): Boolean { onTap(e.x); return true }
         override fun onLongPress(e: MotionEvent) {
-            touched()
+            if (testIndex >= 0) return
+            brain.touch(now())
             performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            sound.play(SoundFx.Sound.CHIRP)
+            sound.play(Sound.CHIRP, now())
             listener?.onLongPress()
+        }
+        override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+            if (testIndex >= 0 || abs(vx) < 900 || abs(vx) < abs(vy) * 1.5f) return false
+            brain.touch(now())
+            listener?.onSwipe()
+            return true
         }
     })
 
@@ -100,10 +133,18 @@ class PetView(context: Context, private val sound: SoundFx) : View(context) {
         isHapticFeedbackEnabled = true
     }
 
+    private fun now() = SystemClock.uptimeMillis()
+
     // ---- Lifecycle ----------------------------------------------------------------------
     fun resume() {
         if (running) return
         running = true
+        lastFrame = 0L
+        if (!started) {
+            started = true
+            startedAt = now()
+            brain.start(now())
+        }
         removeCallbacks(frame)
         post(frame)
     }
@@ -113,101 +154,137 @@ class PetView(context: Context, private val sound: SoundFx) : View(context) {
         removeCallbacks(frame)
     }
 
-    /** Show an expression for its hold time, then fall back to the idle/sleepy base. */
-    fun react(e: Expression) {
-        expression = e
-        reactionUntil = SystemClock.uptimeMillis() + e.holdMs
-        hopStart = SystemClock.uptimeMillis()
+    /** Wake/reset the idle timer from another screen. */
+    fun touched() = brain.touch(now())
+
+    /** Steps through every expression with its sound, for on-device acceptance tests. */
+    fun startExpressionTest() {
+        testIndex = 0
+        nextTestAt = now()
+        brain.touch(now())
     }
 
-    /** Called by the activity whenever the user interacts with any NØVA screen. */
-    fun touched() {
-        lastInteraction = SystemClock.uptimeMillis()
-        if (baseExpression != Expression.IDLE) {
-            val wasSleeping = baseExpression == Expression.SLEEPING
-            baseExpression = Expression.IDLE
-            if (wasSleeping) {
-                react(Expression.SURPRISED)
-                sound.play(SoundFx.Sound.DOUBLE_CHIRP)
-            }
-        }
+    private fun stopExpressionTest() {
+        testIndex = -1
+        brain.forced = null
+        listener?.onExpressionTestFinished()
     }
 
     // ---- Input --------------------------------------------------------------------------
     override fun onTouchEvent(event: MotionEvent): Boolean = gestures.onTouchEvent(event)
 
     private fun onTap(x: Float) {
-        val wasAsleep = baseExpression != Expression.IDLE
-        touched()
-        if (wasAsleep) return          // touched() already played the wake-up reaction
+        if (testIndex >= 0) { stopExpressionTest(); return }
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-
-        val now = SystemClock.uptimeMillis()
-        recentTaps.addLast(now)
-        while (recentTaps.isNotEmpty() && now - recentTaps.first() > 3_000) recentTaps.removeFirst()
-
+        brain.tap(now())
         // Glance toward where we were poked.
         lookTX = ((x / width.coerceAtLeast(1)) - 0.5f) * 0.6f
         lookTY = 0f
-        nextLookAt = now + 1_500
+        nextLookAt = now() + 1_500
+    }
 
-        if (recentTaps.size >= 7) {
-            recentTaps.clear()
-            react(Expression.ANNOYED)
-            sound.play(SoundFx.Sound.HMM)
-            return
-        }
-        val e = Expression.TAP_REACTIONS[Random.nextInt(Expression.TAP_REACTIONS.size)]
-        react(e)
-        sound.play(
-            when (e) {
-                Expression.HAPPY -> SoundFx.Sound.HAPPY
-                Expression.SURPRISED -> SoundFx.Sound.DOUBLE_CHIRP
-                Expression.CURIOUS -> SoundFx.Sound.HMM
-                else -> SoundFx.Sound.CHIRP
-            }
-        )
+    private fun soundFor(e: Expression): Sound? = when (e) {
+        Expression.HAPPY -> Sound.HAPPY
+        Expression.SURPRISED -> Sound.DOUBLE_CHIRP
+        Expression.CURIOUS -> Sound.CURIOUS
+        Expression.MISCHIEVOUS -> Sound.CHIRP
+        Expression.CONFUSED -> Sound.HMM
+        Expression.ANNOYED -> Sound.GLITCH
+        Expression.THINKING -> Sound.THINK
+        Expression.LISTENING -> Sound.LISTEN
+        Expression.ERROR -> Sound.ERROR
+        Expression.SLEEPING -> Sound.SLEEP
+        else -> null
     }
 
     // ---- Per-frame update ---------------------------------------------------------------
-    private fun update(now: Long) {
-        val idleFor = now - lastInteraction
-        val newBase = when {
-            idleFor > sleepAfterMs -> Expression.SLEEPING
-            idleFor > sleepyAfterMs -> Expression.SLEEPY
-            else -> Expression.IDLE
+    private fun frameDelay(): Long {
+        val e = brain.current
+        return when {
+            testIndex >= 0 || e.motion != Motion.NONE || e != brain.base -> 33L      // ~30 fps
+            e == Expression.SLEEPING -> 125L                                          // 8 fps
+            e == Expression.SLEEPY || intensity == Intensity.LOW -> 66L               // 15 fps
+            else -> 40L                                                               // 25 fps
         }
-        if (newBase == Expression.SLEEPING && baseExpression != Expression.SLEEPING) {
-            sound.play(SoundFx.Sound.SLEEP)
-        }
-        baseExpression = newBase
-        if (now > reactionUntil) expression = baseExpression
+    }
 
-        write(tgt, expression.shape)
-        for (i in cur.indices) cur[i] += (tgt[i] - cur[i]) * 0.22f
+    private fun update(now: Long) {
+        val dt = if (lastFrame == 0L) 0.033f else ((now - lastFrame) / 1000f).coerceAtMost(0.25f)
+        lastFrame = now
+
+        if (now >= nextNightCheck) {
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val isNight = settings.isNight(hour)
+            nightTarget = if (isNight) 1f else 0f
+            brain.nightMode = isNight
+            sound.nightMuted = isNight
+            nextNightCheck = now + 30_000
+        }
+        night += (nightTarget - night) * min(1f, dt * 0.8f)   // fade over ~2 s
+
+        if (testIndex >= 0 && now >= nextTestAt) {
+            val all = Expression.entries
+            if (testIndex >= all.size) stopExpressionTest() else {
+                val e = all[testIndex]
+                brain.forced = e
+                soundFor(e)?.let { sound.play(it, now, force = true) }
+                testIndex++
+                nextTestAt = now + testStepMs
+            }
+        }
+
+        brain.tick(now)
+        val e = brain.current
+        write(tgt, e.shape)
+
+        // Damped springs, sub-stepped for stability at low frame rates.
+        var remaining = dt
+        while (remaining > 0f) {
+            val h = min(remaining, 0.02f)
+            for (i in 0 until N) {
+                val a = (tgt[i] - pos[i]) * stiffness - vel[i] * damping
+                vel[i] += a * h
+                pos[i] += vel[i] * h
+            }
+            remaining -= h
+        }
 
         // Blinking (not while asleep).
         if (nextBlinkAt == 0L) nextBlinkAt = now + 2_000
-        if (expression != Expression.SLEEPING && blinkStart < 0 && now >= nextBlinkAt) {
-            blinkStart = now
-        }
+        if (e != Expression.SLEEPING && blinkStart < 0 && now >= nextBlinkAt) blinkStart = now
         if (blinkStart >= 0 && now - blinkStart > blinkMs) {
             blinkStart = -1
-            // Occasionally double-blink.
             nextBlinkAt = now + if (Random.nextInt(6) == 0) 220 else Random.nextLong(2_500, 6_500)
         }
 
-        // Eye wandering.
-        if (now >= nextLookAt) {
-            val calm = expression == Expression.SLEEPY || expression == Expression.SLEEPING
-            if (calm || Random.nextInt(3) == 0) { lookTX = 0f; lookTY = 0f } else {
-                lookTX = Random.nextFloat() * 0.5f - 0.25f
-                lookTY = Random.nextFloat() * 0.2f - 0.1f
+        // Where the eyes look.
+        when {
+            e.motion == Motion.SCAN -> {        // thinking: eyes drift side to side, up
+                lookTX = sin(now / 650.0).toFloat() * 0.28f
+                lookTY = -0.18f
             }
-            nextLookAt = now + Random.nextLong(1_800, 5_000)
+            now >= nextLookAt -> {
+                val calm = e == Expression.SLEEPY || e == Expression.SLEEPING || intensity == Intensity.LOW
+                if (calm || Random.nextInt(3) == 0) { lookTX = 0f; lookTY = 0f } else {
+                    val range = if (intensity == Intensity.HIGH) 0.32f else 0.25f
+                    lookTX = Random.nextFloat() * range * 2 - range
+                    lookTY = Random.nextFloat() * 0.2f - 0.1f
+                }
+                nextLookAt = now + if (intensity == Intensity.HIGH) Random.nextLong(1_200, 3_500)
+                else Random.nextLong(1_800, 5_000)
+            }
         }
-        lookX += (lookTX - lookX) * 0.15f
-        lookY += (lookTY - lookY) * 0.15f
+        val follow = min(1f, dt * 4.5f)
+        lookX += (lookTX - lookX) * follow
+        lookY += (lookTY - lookY) * follow
+
+        // Glitch jitter for errors/annoyance.
+        if (e.motion == Motion.GLITCH) {
+            if (now >= nextGlitchAt) {
+                glitchX = if (Random.nextInt(3) == 0) Random.nextFloat() * 2 - 1 else 0f
+                nextGlitchAt = now + Random.nextLong(60, 160)
+            }
+        } else glitchX = 0f
     }
 
     private fun blinkFactor(now: Long): Float {
@@ -218,65 +295,93 @@ class PetView(context: Context, private val sound: SoundFx) : View(context) {
 
     // ---- Drawing ------------------------------------------------------------------------
     override fun onDraw(canvas: Canvas) {
-        val now = SystemClock.uptimeMillis()
+        val now = now()
         update(now)
+        val e = brain.current
+        val lively = intensity != Intensity.LOW
 
         val w = width.toFloat(); val h = height.toFloat()
         val faceW = min(w * 0.86f, h * 1.55f)
         val faceH = faceW * 0.58f
 
-        // Gentle "breathing" plus a little hop on reactions.
-        val breathe = sin(now / 900.0).toFloat() * faceH * 0.008f
-        var hop = 0f
-        if (hopStart >= 0) {
-            val t = (now - hopStart) / 320f
-            if (t >= 1f) hopStart = -1 else hop = -sin(t * Math.PI).toFloat() * faceH * 0.035f
+        // Breathing, reaction hop, and per-expression motion.
+        var dy = if (lively) sin(now / 900.0).toFloat() * faceH * 0.008f else 0f
+        val hopAge = now - brain.reactionStartedAt
+        if (lively && brain.reactionStartedAt >= 0 && hopAge in 0..320) {
+            dy -= sin(hopAge / 320.0 * Math.PI).toFloat() * faceH * 0.035f
         }
-        val cx = w / 2f; val cy = h / 2f + breathe + hop
+        var sway = 0f
+        var pulse = 0f
+        when (e.motion) {
+            Motion.DANCE -> {
+                val beat = now / 500.0 * Math.PI                     // 120 bpm
+                dy -= abs(sin(beat)).toFloat() * faceH * (if (lively) 0.045f else 0.02f)
+                sway = sin(beat / 2).toFloat() * (if (lively) 4f else 1.5f)
+            }
+            Motion.PULSE -> pulse = sin(now / 140.0).toFloat()
+            else -> Unit
+        }
+        val cx = w / 2f + glitchX * faceW * 0.012f
+        val cy = h / 2f + dy
+
+        val accent = Theme.night(Theme.lerpColor(Theme.CYAN, Theme.AMBER, pos[ALERT]), night, nightStyle)
+        val dim = 1f - 0.35f * night
+        val glow = (pos[GLOW] + pulse * 0.25f) * dim
+        val flicker = if (e.motion == Motion.GLITCH && glitchX != 0f) 0.6f else 1f
+
+        canvas.save()
+        if (sway != 0f) canvas.rotate(sway, cx, cy)
 
         // Faceplate.
         rect.set(cx - faceW / 2, cy - faceH / 2, cx + faceW / 2, cy + faceH / 2)
         val r = faceH * 0.22f
+        facePaint.color = Theme.night(Theme.FACE, night, nightStyle)
         canvas.drawRoundRect(rect, r, r, facePaint)
+        faceEdgePaint.color = Theme.night(Theme.FACE_EDGE, night, nightStyle)
         faceEdgePaint.strokeWidth = faceH * 0.012f
         canvas.drawRoundRect(rect, r, r, faceEdgePaint)
 
-        val glow = cur[G_GLOW]
         val blink = blinkFactor(now)
-        val eyeW = faceW * 0.12f * cur[EYE_W]
-        val eyeH = faceH * 0.40f
+        val eyeW = faceW * 0.12f * pos[EYE_W] * (1f + pulse * 0.04f)
+        val eyeH = faceH * 0.40f * (1f + pulse * 0.05f)
         val eyeDX = faceW * 0.19f
         val eyeY = cy - faceH * 0.06f
         val lookPxX = lookX * faceW * 0.12f
         val lookPxY = lookY * faceH * 0.2f
 
-        drawEye(canvas, cx - eyeDX + lookPxX, eyeY + lookPxY + cur[L_LIFT] * eyeH,
-            eyeW, eyeH * cur[L_OPEN] * blink, cur[L_TILT], glow)
-        drawEye(canvas, cx + eyeDX + lookPxX, eyeY + lookPxY + cur[R_LIFT] * eyeH,
-            eyeW, eyeH * cur[R_OPEN] * blink, -cur[R_TILT], glow)
+        eyePaint.color = accent; glowPaint.color = accent; mouthPaint.color = accent
+        innerPaint.color = Theme.night(Theme.lerpColor(Color.rgb(0x9A, 0xF6, 0xFF), Color.rgb(0xFF, 0xE0, 0xA0), pos[ALERT]), night, nightStyle)
+
+        drawEye(canvas, cx - eyeDX + lookPxX, eyeY + lookPxY + pos[L_LIFT] * eyeH,
+            eyeW, eyeH * pos[L_OPEN] * blink, pos[L_TILT], glow, flicker)
+        drawEye(canvas, cx + eyeDX + lookPxX, eyeY + lookPxY + pos[R_LIFT] * eyeH,
+            eyeW, eyeH * pos[R_OPEN] * blink, -pos[R_TILT], glow, flicker)
 
         // Mouth: a quadratic curve stroked with round caps (straight = pill).
-        val mw = faceW * 0.09f * cur[M_W]
-        val mt = faceH * 0.045f * cur[M_T]
+        val mw = faceW * 0.09f * pos[M_W].coerceAtLeast(0.1f)
+        val mt = faceH * 0.045f * pos[M_T].coerceAtLeast(0.2f)
         val my = cy + faceH * 0.27f + lookPxY * 0.4f
         val mx = cx + lookPxX * 0.5f
-        val skew = cur[M_SKEW] * mw
+        val skew = pos[M_SKEW] * mw
         path.reset()
         path.moveTo(mx - mw / 2, my + skew / 2)
-        path.quadTo(mx, my + cur[M_CURVE] * mw * 2f, mx + mw / 2, my - skew / 2)
-        mouthPaint.color = cyan
-        mouthPaint.alpha = (40 * glow).toInt().coerceIn(0, 255)
-        mouthPaint.strokeWidth = mt * 2.2f
+        path.quadTo(mx, my + pos[M_CURVE] * mw * 2f, mx + mw / 2, my - skew / 2)
+        mouthPaint.alpha = (22 * glow).toInt().coerceIn(0, 255)
+        mouthPaint.strokeWidth = mt + faceH * 0.03f
         canvas.drawPath(path, mouthPaint)
-        mouthPaint.alpha = (255 * min(1f, 0.55f + glow * 0.45f)).toInt()
+        mouthPaint.alpha = (255 * min(1f, 0.55f + glow * 0.45f) * flicker).toInt().coerceIn(0, 255)
         mouthPaint.strokeWidth = mt
         canvas.drawPath(path, mouthPaint)
 
-        if (expression == Expression.SLEEPING) drawZs(canvas, now, cx + faceW * 0.36f, cy - faceH * 0.3f, faceH)
-        drawHint(canvas, now, cx, h - h * 0.06f, h)
+        if (e == Expression.SLEEPING) drawZs(canvas, now, cx + faceW * 0.30f, cy - faceH * 0.12f, faceH, accent)
+        canvas.restore()
+
+        drawCaption(canvas, now, w / 2, h - h * 0.06f, h, accent)
     }
 
-    private fun drawEye(canvas: Canvas, x: Float, y: Float, w: Float, rawH: Float, tilt: Float, glow: Float) {
+    private fun drawEye(
+        canvas: Canvas, x: Float, y: Float, w: Float, rawH: Float, tilt: Float, glow: Float, flicker: Float,
+    ) {
         val h = rawH.coerceAtLeast(w * 0.18f)
         canvas.save()
         canvas.translate(x, y)
@@ -288,48 +393,62 @@ class PetView(context: Context, private val sound: SoundFx) : View(context) {
             rect.set(-w / 2 - g, -h / 2 - g, w / 2 + g, h / 2 + g)
             canvas.drawOval(rect, glowPaint)
         }
-        eyePaint.alpha = (255 * min(1f, 0.55f + glow * 0.45f)).toInt()
+        eyePaint.alpha = (255 * min(1f, 0.55f + glow * 0.45f) * flicker).toInt().coerceIn(0, 255)
         rect.set(-w / 2, -h / 2, w / 2, h / 2)
         canvas.drawOval(rect, eyePaint)
         // Restrained inner highlight.
         if (h > w * 0.6f) {
-            innerPaint.alpha = (110 * min(1f, glow)).toInt()
+            innerPaint.alpha = (110 * min(1f, glow)).toInt().coerceIn(0, 255)
             rect.set(-w * 0.28f, -h * 0.36f, w * 0.02f, -h * 0.08f)
             canvas.drawOval(rect, innerPaint)
         }
         canvas.restore()
     }
 
-    private fun drawZs(canvas: Canvas, now: Long, x: Float, y: Float, faceH: Float) {
+    private fun drawZs(canvas: Canvas, now: Long, x: Float, y: Float, faceH: Float, color: Int) {
+        textPaint.color = color
         for (i in 0 until 3) {
             val t = ((now / 2600f) + i / 3f) % 1f
             textPaint.textSize = faceH * (0.07f + 0.05f * t)
             textPaint.alpha = (200 * sin(t * Math.PI)).toInt().coerceIn(0, 255)
-            canvas.drawText("z", x + t * faceH * 0.15f, y - t * faceH * 0.3f, textPaint)
+            canvas.drawText("z", x + t * faceH * 0.12f, y - t * faceH * 0.22f, textPaint)
         }
     }
 
-    private fun drawHint(canvas: Canvas, now: Long, x: Float, y: Float, h: Float) {
+    /** One quiet line under the face: test progress, error status, or the first-run hint. */
+    private fun drawCaption(canvas: Canvas, now: Long, x: Float, y: Float, h: Float, accent: Int) {
+        textPaint.textSize = h * 0.038f
+        val forced = brain.forced
+        val status = brain.status
         val age = now - startedAt
-        if (age > hintVisibleMs) return
-        val fade = ((hintVisibleMs - age) / 1_500f).coerceIn(0f, 1f)
-        textPaint.textSize = h * 0.035f
-        textPaint.alpha = (120 * fade).toInt()
-        canvas.drawText("tap me  ·  long-press for clock", x, y, textPaint)
+        val (text, alpha) = when {
+            testIndex >= 0 && forced != null ->
+                "${forced.ordinal + 1} / ${Expression.entries.size}   ${forced.label}   ·   tap to stop" to 170
+            status != null -> status to 200
+            age < HINT_MS -> "tap me  ·  swipe or long-press for clock" to
+                (120 * ((HINT_MS - age) / 1_500f).coerceIn(0f, 1f)).toInt()
+            else -> return
+        }
+        textPaint.color = if (status != null && testIndex < 0) accent else Theme.night(Theme.SECONDARY, night, nightStyle)
+        textPaint.alpha = alpha
+        canvas.drawText(text, x, y, textPaint)
     }
 
     private companion object {
+        const val HINT_MS = 7_000L
         const val L_OPEN = 0; const val R_OPEN = 1; const val EYE_W = 2
         const val L_TILT = 3; const val R_TILT = 4; const val L_LIFT = 5; const val R_LIFT = 6
         const val M_W = 7; const val M_T = 8; const val M_CURVE = 9; const val M_SKEW = 10
-        const val G_GLOW = 11
+        const val GLOW = 11; const val ALERT = 12
+        const val N = 13
 
         fun write(a: FloatArray, s: FaceShape) {
             a[L_OPEN] = s.leftOpen; a[R_OPEN] = s.rightOpen; a[EYE_W] = s.eyeWidth
             a[L_TILT] = s.leftTilt; a[R_TILT] = s.rightTilt
             a[L_LIFT] = s.leftLift; a[R_LIFT] = s.rightLift
             a[M_W] = s.mouthWidth; a[M_T] = s.mouthThickness
-            a[M_CURVE] = s.mouthCurve; a[M_SKEW] = s.mouthSkew; a[G_GLOW] = s.glow
+            a[M_CURVE] = s.mouthCurve; a[M_SKEW] = s.mouthSkew
+            a[GLOW] = s.glow; a[ALERT] = s.alert
         }
     }
 }
