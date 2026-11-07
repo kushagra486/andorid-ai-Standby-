@@ -9,8 +9,17 @@ again on the phone against the same allowlist. Nothing in the APK or Git contain
 | `GET /v1/health` | `{ok, version, provider}` — no secrets |
 | `POST /v1/chat` | `Authorization: Bearer <NOVA_ACCESS_TOKEN>`, body `{"text": "...", "context": {...}}` |
 
-**Provider:** if the secret `GEMINI_API_KEY` is set, Gemini (`GEMINI_MODEL`) is used; otherwise
-**Workers AI** (free daily allowance, no extra key) runs `WORKERS_AI_MODEL`.
+**Provider** — the first key found wins (or force one with the `AI_PROVIDER` var):
+
+| Secret | Provider | Default model (change in `wrangler.jsonc` vars) | Free tier (check current limits) |
+|---|---|---|---|
+| `GROQ_API_KEY` | Groq — console.groq.com | `llama-3.3-70b-versatile` | free, very fast, per-minute/day limits |
+| `OPENROUTER_API_KEY` | OpenRouter — openrouter.ai | `meta-llama/llama-3.3-70b-instruct:free` | `:free` models, low daily limit |
+| `NVIDIA_API_KEY` | NVIDIA NIM — build.nvidia.com | `meta/llama-3.3-70b-instruct` | free developer credits / rate limits |
+| `GEMINI_API_KEY` | Google Gemini | `gemini-2.5-flash` | free tier |
+| *(none)* | **Workers AI** (built in) | `@cf/meta/llama-3.1-8b-instruct` | free daily allowance, no key |
+
+Model names get retired over time; if a provider starts returning errors, update its `*_MODEL` var.
 **Limits:** 20 requests/minute per installation (rate-limiting binding), 500 characters per request.
 **Privacy:** prompts and replies are never logged; only error status codes.
 

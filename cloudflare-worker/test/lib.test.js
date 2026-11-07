@@ -75,3 +75,30 @@ test("provider failure is reported without content", async () => {
   const r = await worker.fetch(chat({ authorization: "Bearer secret-token" }, { text: "hi" }), broken);
   assert.equal(r.status, 502);
 });
+
+test("provider selection prefers keys, honours AI_PROVIDER, falls back to Workers AI", async () => {
+  const { provider } = await import("../src/index.js");
+  assert.equal(provider({ AI: {} }), "workers-ai");
+  assert.equal(provider({ AI: {}, GROQ_API_KEY: "g" }), "groq");
+  assert.equal(provider({ AI: {}, OPENROUTER_API_KEY: "o", NVIDIA_API_KEY: "n" }), "openrouter");
+  assert.equal(provider({ AI: {}, GROQ_API_KEY: "g", AI_PROVIDER: "workers-ai" }), "workers-ai");
+  assert.equal(provider({ AI: {}, AI_PROVIDER: "nvidia" }), "workers-ai");      // forced provider without key is ignored
+  assert.equal(provider({}), "none");
+});
+
+test("OpenAI-compatible providers (Groq) are called with the key and validated", async () => {
+  const realFetch = globalThis.fetch;
+  let seen;
+  globalThis.fetch = async (url, init) => {
+    seen = { url, auth: init.headers.authorization, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"reply":"Hi!","action":{"type":"RUN_SHELL"}}' } }] }), { status: 200 });
+  };
+  try {
+    const r = await worker.fetch(chat({ authorization: "Bearer secret-token" }, { text: "hello" }), env({ GROQ_API_KEY: "gk" }));
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { reply: "Hi!", action: null });
+    assert.match(seen.url, /api\.groq\.com/);
+    assert.equal(seen.auth, "Bearer gk");
+    assert.equal(seen.body.model, "llama-3.3-70b-versatile");
+  } finally { globalThis.fetch = realFetch; }
+});

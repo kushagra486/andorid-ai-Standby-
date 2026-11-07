@@ -6,10 +6,44 @@ import { VERSION, SYSTEM_PROMPT, parseModelJson, safeEqual, shapeReply, validate
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 
-function provider(env) {
-  if (env.GEMINI_API_KEY) return "gemini";
-  if (env.AI) return "workers-ai";
+// OpenAI-compatible providers with free tiers. Model names change over time: override with
+// the GROQ_MODEL / OPENROUTER_MODEL / NVIDIA_MODEL vars in wrangler.jsonc.
+const OPENAI_COMPAT = {
+  groq: { key: "GROQ_API_KEY", url: "https://api.groq.com/openai/v1/chat/completions", modelVar: "GROQ_MODEL", model: "llama-3.3-70b-versatile" },
+  openrouter: { key: "OPENROUTER_API_KEY", url: "https://openrouter.ai/api/v1/chat/completions", modelVar: "OPENROUTER_MODEL", model: "meta-llama/llama-3.3-70b-instruct:free" },
+  nvidia: { key: "NVIDIA_API_KEY", url: "https://integrate.api.nvidia.com/v1/chat/completions", modelVar: "NVIDIA_MODEL", model: "meta/llama-3.3-70b-instruct" },
+};
+
+/** Which provider answers: AI_PROVIDER var if set and usable, else the first key found, else Workers AI. */
+export function provider(env) {
+  const usable = (p) =>
+    (p === "gemini" && env.GEMINI_API_KEY) || (OPENAI_COMPAT[p] && env[OPENAI_COMPAT[p].key]) || (p === "workers-ai" && env.AI);
+  if (env.AI_PROVIDER && usable(env.AI_PROVIDER)) return env.AI_PROVIDER;
+  for (const p of ["groq", "openrouter", "nvidia", "gemini", "workers-ai"]) if (usable(p)) return p;
   return "none";
+}
+
+async function askOpenAICompat(env, name, text, context) {
+  const cfg = OPENAI_COMPAT[name];
+  const headers = { "content-type": "application/json", authorization: `Bearer ${env[cfg.key]}` };
+  if (name === "openrouter") { headers["HTTP-Referer"] = "https://github.com/nova-zenfone"; headers["X-Title"] = "NOVA"; }
+  const res = await fetch(cfg.url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: env[cfg.modelVar] || cfg.model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: `Context: ${JSON.stringify(context)}\nUser: ${text}` },
+      ],
+      max_tokens: 300,
+      temperature: 0.6,
+    }),
+  });
+  if (res.status === 429) throw Object.assign(new Error("provider quota"), { status: 429 });
+  if (!res.ok) throw Object.assign(new Error(`provider ${res.status}`), { status: 502 });
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content || "";
 }
 
 async function askGemini(env, text, context) {
@@ -53,7 +87,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/v1/health" && request.method === "GET") {
-      return json({ ok: true, version: VERSION, provider: provider(env) });
+      return json({ ok: true, version: VERSION, provider: provider(env) });   // provider name only, never keys
     }
 
     if (url.pathname !== "/v1/chat") return json({ error: "not found" }, 404);
@@ -77,7 +111,9 @@ export default {
     const p = provider(env);
     if (p === "none") return json({ error: "no AI provider configured" }, 503);
     try {
-      const raw = p === "gemini" ? await askGemini(env, req.text, req.context) : await askWorkersAI(env, req.text, req.context);
+      const raw = p === "gemini" ? await askGemini(env, req.text, req.context)
+        : p === "workers-ai" ? await askWorkersAI(env, req.text, req.context)
+        : await askOpenAICompat(env, p, req.text, req.context);
       const parsed = parseModelJson(raw);
       return json(shapeReply(parsed, parsed ? "" : raw));
     } catch (e) {
