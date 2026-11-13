@@ -124,7 +124,7 @@ class MusicView(context: Context) : View(context) {
         text(c, "Change ›", dest.right - h * 0.04f, dest.centerY() + h * 0.014f, h * 0.036f, ColorRole.ACCENT, Theme.medium, dest.width() * 0.3f, Paint.Align.RIGHT)
 
         // Little music-reactive eyes in the corner.
-        if (bmp != null) eyes(c, w - h * 0.12f, h * 0.1f, h * 0.035f, beat)
+        if (bmp != null) eyes(c, w - h * 0.26f, h * 0.1f, h * 0.035f, beat)   // clear of the corner settings button
     }
 
     private fun eyes(c: Canvas, cx: Float, cy: Float, s: Float, beat: Float) {

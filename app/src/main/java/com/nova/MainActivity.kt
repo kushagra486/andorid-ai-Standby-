@@ -135,6 +135,7 @@ class MainActivity : Activity(), SettingsHost {
                 override fun onFamilyChanged(family: Family) { touch(); pinned = false }
                 override fun onQuickControlsPull(progress: Float, release: Boolean) = controls.pull(progress, release)
                 override fun onUserActivity() = touch()
+                override fun onSettingsButton() = openSettings()
             }
         }
         menu = QuickMenu(this, ::onMenu)
@@ -250,6 +251,7 @@ class MainActivity : Activity(), SettingsHost {
         }
         override fun onTileOptions(layout: Layout, tile: Tile) { openSettings(); settings.push(SettingsPages.layouts()); settings.push(SettingsPages.layoutEditor(layout.id)); settings.push(SettingsPages.tileEditor(layout.id, tile.id)) }
         override fun onLockedLongPress() = toast("This layout is locked — unlock it in Settings → Layouts")
+        override fun onEditModeChanged(editing: Boolean) = host.refreshChrome()
     }
 
     private fun widgetTap(type: WidgetType) {
@@ -346,6 +348,7 @@ class MainActivity : Activity(), SettingsHost {
         Look.reload()
         applyPrefs()
         host.invalidateAll()
+        host.refreshChrome()
     }
 
     private fun StandbyHost.invalidateAll() {

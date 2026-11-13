@@ -22,6 +22,7 @@ import com.nova.storage.TempUnit
 import com.nova.storage.Volume
 import com.nova.ui.ColorRole
 import com.nova.ui.Look
+import com.nova.ui.ThemePreset
 import com.nova.voice.WakeWord
 import com.nova.widgets.Layout
 import com.nova.widgets.LayoutBook
@@ -51,6 +52,10 @@ interface SettingsHost {
 object SettingsPages {
 
     fun root(host: SettingsHost): SettingsPage = SettingsPage("Settings") {
+        section("Colour theme", footer = "Tap a theme to apply it. Customise colours lets you pick your own colour for every part of NØVA.") {
+            custom(ThemeStripView(screen.context), screen.dp(150))
+            nav("Customise colours", if (Look.preset == ThemePreset.CUSTOM) "Custom" else "") { AppearancePages.colours() }
+        }
         section {
             nav("Appearance", Look.preset.label) { AppearancePages.appearance() }
             nav("Display & night", Prefs.nightMode.label) { display(host) }
@@ -230,7 +235,7 @@ object SettingsPages {
     fun weather() = SettingsPage("Weather") {
         section(footer = "Weather data by Open-Meteo.com (free, no account). Only the place you pick is sent — no GPS.") {
             info("Location", Prefs.weatherPlace.ifBlank { "Not set" })
-            textField("Search place", "", hint = "e.g. Pune") { q ->
+            textField("Search place", "", hint = "e.g. Prayagraj") { q ->
                 if (q.isBlank()) return@textField
                 Weather.search(q) { r ->
                     r.onSuccess { places ->
@@ -277,7 +282,7 @@ object SettingsPages {
         section(footer = "General questions go to your own Cloudflare Worker (see cloudflare-worker/README.md). The AI key stays on Cloudflare; " +
             "this phone only stores the Worker address and your access token. Every action the AI proposes is checked against NØVA's allowlist.") {
             toggle("Use Cloud AI", Prefs.aiEnabled) { Prefs.aiEnabled = it }
-            textField("Worker URL", Prefs.aiEndpoint, hint = "https://andorid-ai-standby.<you>.workers.dev") { Prefs.aiEndpoint = it.trimEnd('/') }
+            textField("Worker URL", Prefs.aiEndpoint, hint = "https://andorid-ai-standby.<you>.workers.dev") { Prefs.aiEndpoint = AiClient.baseUrl(it) }
             textField("Access token", Prefs.aiToken, secret = true) { Prefs.aiToken = it }
             action("Test connection") { AiClient.health { msg -> screen.confirm("Cloud AI", msg, "OK") {} } }
         }

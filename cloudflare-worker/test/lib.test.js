@@ -99,7 +99,8 @@ test("OpenAI-compatible providers (Groq) are called with the key and validated",
     assert.deepEqual(await r.json(), { reply: "Hi!", action: null });
     assert.match(seen.url, /api\.groq\.com/);
     assert.equal(seen.auth, "Bearer gk");
-    assert.equal(seen.body.model, "llama-3.3-70b-versatile");
+    assert.equal(seen.body.model, "openai/gpt-oss-20b");
+    assert.equal(seen.body.reasoning_effort, "low");
   } finally { globalThis.fetch = realFetch; }
 });
 
@@ -109,4 +110,33 @@ test("unauthenticated requests are rate limited by IP before the token check", a
   const r = await worker.fetch(chat({ authorization: "Bearer wrong", "cf-connecting-ip": "1.2.3.4", "x-nova-install": "rotating" }, { text: "hi" }), limiter);
   assert.equal(r.status, 429);
   assert.deepEqual(keys, ["ip:1.2.3.4"]);
+});
+
+
+test("Groq model failure falls back to the next model, then to Workers AI", async () => {
+  const realFetch = globalThis.fetch;
+  const tried = [];
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body); tried.push(body.model);
+    if (body.model === "openai/gpt-oss-20b") return new Response('{"error":{"message":"model not available"}}', { status: 404 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"reply":"From 8b","action":null}' } }] }), { status: 200 });
+  };
+  try {
+    const r = await worker.fetch(chat({ authorization: "Bearer secret-token" }, { text: "hi" }), env({ GROQ_API_KEY: "gk" }));
+    assert.deepEqual(await r.json(), { reply: "From 8b", action: null });
+    assert.deepEqual(tried, ["openai/gpt-oss-20b", "llama-3.1-8b-instant"]);
+
+    // Every Groq model failing → the built-in Workers AI answers instead of an error.
+    globalThis.fetch = async () => new Response("{}", { status: 500 });
+    const r2 = await worker.fetch(chat({ authorization: "Bearer secret-token" }, { text: "hi" }), env({ GROQ_API_KEY: "gk" }));
+    assert.equal(r2.status, 200);
+    assert.equal((await r2.json()).reply, "Timer started");
+
+    // A rejected key is reported with the upstream status when there is no fallback.
+    globalThis.fetch = async () => new Response("{}", { status: 401 });
+    const noAi = env({ GROQ_API_KEY: "bad" }); delete noAi.AI;
+    const r3 = await worker.fetch(chat({ authorization: "Bearer secret-token" }, { text: "hi" }), noAi);
+    assert.equal(r3.status, 502);
+    assert.deepEqual(await r3.json(), { error: "provider error", provider: "groq", upstream_status: 401 });
+  } finally { globalThis.fetch = realFetch; }
 });

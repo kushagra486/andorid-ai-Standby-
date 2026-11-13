@@ -68,9 +68,10 @@ object Prefs {
     var disabledFamilies by string("disabledFamilies", "")
 
     // ---- Weather -------------------------------------------------------------------------
-    var weatherPlace by string("weatherPlace", "")
-    var weatherLat by float("weatherLat", Float.NaN)
-    var weatherLon by float("weatherLon", Float.NaN)
+    // Default location: Prayagraj, Uttar Pradesh (change in Settings → Weather).
+    var weatherPlace by string("weatherPlace", "Prayagraj")
+    var weatherLat by float("weatherLat", 25.44478f)
+    var weatherLon by float("weatherLon", 81.84322f)
     var tempUnit by enum("tempUnit", TempUnit.C)
 
     // ---- Photos --------------------------------------------------------------------------
