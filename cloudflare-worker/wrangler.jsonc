@@ -20,7 +20,7 @@
   "vars": {
     // Optional: force one of groq | openrouter | nvidia | gemini | workers-ai (otherwise first key found wins).
     "AI_PROVIDER": "",
-    "GROQ_MODEL": "llama-3.3-70b-versatile",
+    "GROQ_MODEL": "openai/gpt-oss-20b",
     "OPENROUTER_MODEL": "meta-llama/llama-3.3-70b-instruct:free",
     "NVIDIA_MODEL": "meta/llama-3.3-70b-instruct",
     "GEMINI_MODEL": "gemini-2.5-flash",

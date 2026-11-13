@@ -9,7 +9,8 @@ const json = (obj, status = 200) =>
 // OpenAI-compatible providers with free tiers. Model names change over time: override with
 // the GROQ_MODEL / OPENROUTER_MODEL / NVIDIA_MODEL vars in wrangler.jsonc.
 const OPENAI_COMPAT = {
-  groq: { key: "GROQ_API_KEY", url: "https://api.groq.com/openai/v1/chat/completions", modelVar: "GROQ_MODEL", model: "llama-3.3-70b-versatile" },
+  // Free-tier friendly models first; the configured GROQ_MODEL is always tried first.
+  groq: { key: "GROQ_API_KEY", url: "https://api.groq.com/openai/v1/chat/completions", modelVar: "GROQ_MODEL", model: "openai/gpt-oss-20b", fallbacks: ["llama-3.1-8b-instant"] },
   openrouter: { key: "OPENROUTER_API_KEY", url: "https://openrouter.ai/api/v1/chat/completions", modelVar: "OPENROUTER_MODEL", model: "meta-llama/llama-3.3-70b-instruct:free" },
   nvidia: { key: "NVIDIA_API_KEY", url: "https://integrate.api.nvidia.com/v1/chat/completions", modelVar: "NVIDIA_MODEL", model: "meta/llama-3.3-70b-instruct" },
 };
@@ -27,23 +28,33 @@ async function askOpenAICompat(env, name, text, context) {
   const cfg = OPENAI_COMPAT[name];
   const headers = { "content-type": "application/json", authorization: `Bearer ${env[cfg.key]}` };
   if (name === "openrouter") { headers["HTTP-Referer"] = "https://github.com/nova-zenfone"; headers["X-Title"] = "NOVA"; }
-  const res = await fetch(cfg.url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model: env[cfg.modelVar] || cfg.model,
+  // Try the configured model, then the built-in defaults: models get retired or moved off free tiers.
+  const models = [...new Set([env[cfg.modelVar], cfg.model, ...(cfg.fallbacks || [])].filter(Boolean))];
+  let last = null;
+  for (const model of models) {
+    const body = {
+      model,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: `Context: ${JSON.stringify(context)}\nUser: ${text}` },
       ],
-      max_tokens: 300,
+      max_tokens: 700,
       temperature: 0.6,
-    }),
-  });
-  if (res.status === 429) throw Object.assign(new Error("provider quota"), { status: 429 });
-  if (!res.ok) throw Object.assign(new Error(`provider ${res.status}`), { status: 502 });
-  const data = await res.json();
-  return data?.choices?.[0]?.message?.content || "";
+    };
+    // Reasoning models: keep thinking short so the answer fits, and don't return the reasoning.
+    if (/gpt-oss/.test(model)) { body.reasoning_effort = "low"; body.include_reasoning = false; }
+    const res = await fetch(cfg.url, { method: "POST", headers, body: JSON.stringify(body) });
+    if (res.status === 429) throw Object.assign(new Error("provider quota"), { status: 429, upstream: 429 });
+    if (res.status === 401 || res.status === 403) {
+      throw Object.assign(new Error("provider rejected key"), { status: 502, upstream: res.status });   // another model won't help
+    }
+    if (!res.ok) { last = Object.assign(new Error(`provider ${res.status}`), { status: 502, upstream: res.status, model }); continue; }
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content || "";
+    if (content.trim()) return content;
+    last = Object.assign(new Error("empty reply"), { status: 502, upstream: 200, model });
+  }
+  throw last || Object.assign(new Error("no model"), { status: 502 });
 }
 
 async function askGemini(env, text, context) {
@@ -114,15 +125,24 @@ export default {
 
     const p = provider(env);
     if (p === "none") return json({ error: "no AI provider configured" }, 503);
+    const ask = (name) => name === "gemini" ? askGemini(env, req.text, req.context)
+      : name === "workers-ai" ? askWorkersAI(env, req.text, req.context)
+      : askOpenAICompat(env, name, req.text, req.context);
+    let raw;
     try {
-      const raw = p === "gemini" ? await askGemini(env, req.text, req.context)
-        : p === "workers-ai" ? await askWorkersAI(env, req.text, req.context)
-        : await askOpenAICompat(env, p, req.text, req.context);
-      const parsed = parseModelJson(raw);
-      return json(shapeReply(parsed, parsed ? "" : raw));
+      raw = await ask(p);
     } catch (e) {
-      console.log(JSON.stringify({ event: "provider_error", status: e.status || 500 }));   // no content logged
-      return json({ error: "provider error" }, e.status === 429 ? 429 : 502);
+      // No content is logged — only which provider failed and its HTTP status.
+      console.log(JSON.stringify({ event: "provider_error", provider: p, upstream: e.upstream || null, model: e.model || null }));
+      // Fall back to the built-in Workers AI so the user still gets an answer.
+      if (p !== "workers-ai" && env.AI) {
+        try { raw = await ask("workers-ai"); } catch { /* fall through */ }
+      }
+      if (raw === undefined) {
+        return json({ error: "provider error", provider: p, upstream_status: e.upstream || null }, e.status === 429 ? 429 : 502);
+      }
     }
+    const parsed = parseModelJson(raw);
+    return json(shapeReply(parsed, parsed ? "" : raw));
   },
 };

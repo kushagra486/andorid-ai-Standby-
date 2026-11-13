@@ -13,13 +13,13 @@ again on the phone against the same allowlist. Nothing in the APK or Git contain
 
 | Secret | Provider | Default model (change in `wrangler.jsonc` vars) | Free tier (check current limits) |
 |---|---|---|---|
-| `GROQ_API_KEY` | Groq — console.groq.com | `llama-3.3-70b-versatile` | free, very fast, per-minute/day limits |
+| `GROQ_API_KEY` | Groq — console.groq.com | `openai/gpt-oss-20b` → fallback `llama-3.1-8b-instant` | free, very fast, per-minute/day limits |
 | `OPENROUTER_API_KEY` | OpenRouter — openrouter.ai | `meta-llama/llama-3.3-70b-instruct:free` | `:free` models, low daily limit |
 | `NVIDIA_API_KEY` | NVIDIA NIM — build.nvidia.com | `meta/llama-3.3-70b-instruct` | free developer credits / rate limits |
 | `GEMINI_API_KEY` | Google Gemini | `gemini-2.5-flash` | free tier |
 | *(none)* | **Workers AI** (built in) | `@cf/meta/llama-3.1-8b-instruct` | free daily allowance, no key |
 
-Model names get retired over time; if a provider starts returning errors, update its `*_MODEL` var.
+Model names get retired or moved off free tiers over time. The Worker tries the configured model, then built-in fallbacks, and finally answers with Workers AI; errors include the provider status (`upstream_status`).
 **Limits:** 20 requests/minute per installation (rate-limiting binding), 500 characters per request.
 **Privacy:** prompts and replies are never logged; only error status codes.
 
