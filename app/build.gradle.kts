@@ -13,8 +13,8 @@ android {
         targetSdk = 35
         // Vosk (wake word) ships native code; the ZenFone (MT6737T) is ARM.
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
-        versionCode = 4
-        versionName = "1.0.1"
+        versionCode = 5
+        versionName = "1.0.2"
     }
 
     signingConfigs {

@@ -88,6 +88,20 @@ class RobolectricUnitTests {
         assertNull(plain.action)
     }
 
+    @Test fun `worker url is normalised to scheme and host`() {
+        val want = "https://andorid-ai-standby.example.workers.dev"
+        listOf(
+            "https://andorid-ai-standby.example.workers.dev",
+            "https://andorid-ai-standby.example.workers.dev/",
+            "https://andorid-ai-standby.example.workers.dev/v1/health",
+            "https://andorid-ai-standby.example.workers.dev/v1/chat?x=1",
+            " andorid-ai-standby.example.workers.dev ",
+            "HTTPS://Andorid-AI-Standby.Example.Workers.dev/v1",
+        ).forEach { assertEquals(it, want, AiClient.baseUrl(it)) }
+        assertEquals("", AiClient.baseUrl("  "))
+        assertEquals("http://192.168.1.5", AiClient.baseUrl("http://192.168.1.5/x"))
+    }
+
     @Test fun `spotify auth url uses pkce`() {
         com.nova.storage.Prefs.init(org.robolectric.RuntimeEnvironment.getApplication())
         com.nova.storage.Prefs.spotifyClientId = "abc"

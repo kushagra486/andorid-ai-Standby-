@@ -19,7 +19,21 @@ import java.util.UUID
 object AiClient {
     private val main = Handler(Looper.getMainLooper())
 
-    val configured: Boolean get() = Prefs.aiEnabled && Prefs.aiEndpoint.startsWith("https://") && Prefs.aiToken.isNotBlank()
+    val configured: Boolean get() = Prefs.aiEnabled && baseUrl(Prefs.aiEndpoint).startsWith("https://") && Prefs.aiToken.isNotBlank()
+
+    /**
+     * Normalise whatever was typed into "Worker URL" to just scheme + host (pure, unit-tested):
+     * adds https:// if missing, drops spaces, any path such as /v1/health or /v1/chat, query
+     * and trailing slashes, and lower-cases the host. Paths there were causing HTTP 404s.
+     */
+    fun baseUrl(raw: String): String {
+        var s = raw.trim().replace(" ", "")
+        if (s.isEmpty()) return ""
+        if (!s.contains("://")) s = "https://$s"
+        val scheme = s.substringBefore("://").lowercase()
+        val host = s.substringAfter("://").substringBefore('/').substringBefore('?').substringBefore('#').lowercase()
+        return "$scheme://$host"
+    }
 
     val installId: String
         get() = Prefs.raw.getString("installId", null) ?: UUID.randomUUID().toString().also { Prefs.raw.edit().putString("installId", it).apply() }
@@ -36,7 +50,7 @@ object AiClient {
     }
 
     fun chat(text: String, context: Map<String, String>, done: (Result<Pair<Reply, String?>>) -> Unit) {
-        val url = Prefs.aiEndpoint.trimEnd('/') + "/v1/chat"
+        val url = baseUrl(Prefs.aiEndpoint) + "/v1/chat"
         val body = JSONObject().apply {
             put("text", text.take(500))
             put("context", JSONObject(context))
@@ -56,21 +70,24 @@ object AiClient {
     fun health(done: (String) -> Unit) {
         Net.bg.execute {
             val msg = runCatching {
-                val o = JSONObject(Net.get(Prefs.aiEndpoint.trimEnd('/') + "/v1/health"))
+                val o = JSONObject(Net.get(baseUrl(Prefs.aiEndpoint) + "/v1/health"))
+                if (!o.optBoolean("ok")) throw org.json.JSONException("not a NØVA Worker")
                 "OK · ${o.optString("provider")} · ${o.optString("version")}"
-            }.getOrElse { describe(it) }
+            }.getOrElse { describe(it) + "\n\nAddress used: " + baseUrl(Prefs.aiEndpoint) }
             main.post { done(msg) }
         }
     }
 
     fun describe(e: Throwable): String = when (e) {
         is HttpException -> when (e.code) {
-            401, 403 -> "Cloud AI rejected the access token"
+            401, 403 -> "Cloud AI rejected the access token — it must match NOVA_ACCESS_TOKEN exactly"
+            404 -> "Cloud AI address not found — check the Worker URL spelling in Settings → Cloud AI (it ends in .workers.dev)"
             429 -> "Cloud AI limit reached — local commands still work"
             in 500..599 -> "Cloud AI is having trouble (${e.code})"
             else -> "Cloud AI error ${e.code}"
         }
-        is java.net.UnknownHostException, is java.net.ConnectException -> "No internet — local commands still work"
+        is java.net.UnknownHostException -> "Can't find that address — check the Worker URL, or the internet connection"
+        is java.net.ConnectException -> "No internet — local commands still work"
         is java.net.SocketTimeoutException -> "Cloud AI timed out"
         is javax.net.ssl.SSLException, is java.security.cert.CertificateException ->
             "Secure connection failed — check the phone's date & time are correct"
